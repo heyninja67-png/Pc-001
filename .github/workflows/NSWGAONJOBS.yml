@@ -1,0 +1,243 @@
+name: NSWGAONJOBS
+
+on:
+  workflow_dispatch:
+
+jobs:
+  windows-cloud-pc:
+    name: NSWGAONJOBS Windows Cloud PC
+    runs-on: windows-latest
+    timeout-minutes: 360
+
+    env:
+      RDP_USERNAME: "NSWGAONJOBS"
+      RDP_PASSWORD: "PlayInZoneTech"
+
+    steps:
+
+      - name: Configurar usuário RDP
+        shell: powershell
+        run: |
+          $username = $env:RDP_USERNAME
+          $password = $env:RDP_PASSWORD
+
+          Write-Host "Configurando usuário $username..."
+
+          $securePassword = ConvertTo-SecureString `
+            $password `
+            -AsPlainText `
+            -Force
+
+          $existingUser = Get-LocalUser `
+            -Name $username `
+            -ErrorAction SilentlyContinue
+
+          if ($null -eq $existingUser) {
+
+              New-LocalUser `
+                -Name $username `
+                -Password $securePassword `
+                -FullName "NSWGAONJOBS Cloud PC" `
+                -Description "Cloud PC RDP User" `
+                -PasswordNeverExpires `
+                -UserMayNotChangePassword
+
+              Write-Host "Usuário criado."
+
+          } else {
+
+              Set-LocalUser `
+                -Name $username `
+                -Password $securePassword `
+                -PasswordNeverExpires $true
+
+              Write-Host "Usuário já existia. Senha atualizada."
+          }
+
+          Add-LocalGroupMember `
+            -Group "Administrators" `
+            -Member $username `
+            -ErrorAction SilentlyContinue
+
+          Add-LocalGroupMember `
+            -Group "Remote Desktop Users" `
+            -Member $username `
+            -ErrorAction SilentlyContinue
+
+          Write-Host ""
+          Write-Host "================================"
+          Write-Host "USUARIO: $username"
+          Write-Host "SENHA: $password"
+          Write-Host "================================"
+
+      - name: Ativar Remote Desktop
+        shell: powershell
+        run: |
+          Write-Host "Ativando Remote Desktop..."
+
+          Set-ItemProperty `
+            -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" `
+            -Name "fDenyTSConnections" `
+            -Value 0
+
+          Set-ItemProperty `
+            -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" `
+            -Name "UserAuthentication" `
+            -Value 1
+
+          Set-Service `
+            -Name "TermService" `
+            -StartupType Automatic
+
+          Start-Service `
+            -Name "TermService" `
+            -ErrorAction SilentlyContinue
+
+          Enable-NetFirewallRule `
+            -DisplayGroup "Remote Desktop" `
+            -ErrorAction SilentlyContinue
+
+          Write-Host "Remote Desktop ativado."
+
+      - name: Instalar Tailscale
+        shell: powershell
+        run: |
+          $installer = "$env:TEMP\tailscale-setup.exe"
+
+          Write-Host "Baixando Tailscale..."
+
+          Invoke-WebRequest `
+            -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-latest.exe" `
+            -OutFile $installer
+
+          Write-Host "Instalando Tailscale..."
+
+          Start-Process `
+            -FilePath $installer `
+            -ArgumentList "/quiet" `
+            -Wait
+
+          Start-Sleep -Seconds 5
+
+          Write-Host "Tailscale instalado."
+
+      - name: Conectar ao Tailscale
+        shell: powershell
+        env:
+          TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
+        run: |
+          $tailscale = "C:\Program Files\Tailscale\tailscale.exe"
+
+          if (-not (Test-Path $tailscale)) {
+              throw "Tailscale não foi encontrado."
+          }
+
+          if ([string]::IsNullOrWhiteSpace($env:TAILSCALE_AUTHKEY)) {
+              throw "O Secret TAILSCALE_AUTHKEY não foi configurado."
+          }
+
+          Write-Host "Conectando ao Tailscale..."
+
+          & $tailscale up `
+            --authkey="$env:TAILSCALE_AUTHKEY" `
+            --hostname="NSWGAONJOBS"
+
+          Start-Sleep -Seconds 5
+
+          $rdpIp = (& $tailscale ip -4 | Select-Object -First 1).Trim()
+
+          if ([string]::IsNullOrWhiteSpace($rdpIp)) {
+              throw "Não foi possível obter o IP do Tailscale."
+          }
+
+          Write-Host ""
+          Write-Host "=============================================="
+          Write-Host "       NSWGAONJOBS - CLOUD PC"
+          Write-Host "=============================================="
+          Write-Host ""
+          Write-Host "RDP IP:   $rdpIp"
+          Write-Host "PORTA:    3389"
+          Write-Host "USUARIO:  $env:RDP_USERNAME"
+          Write-Host "SENHA:    $env:RDP_PASSWORD"
+          Write-Host ""
+          Write-Host "No Windows App:"
+          Write-Host "PC name:  $rdpIp"
+          Write-Host "Username: $env:RDP_USERNAME"
+          Write-Host "Password: $env:RDP_PASSWORD"
+          Write-Host ""
+          Write-Host "=============================================="
+
+      - name: Verificar RDP
+        shell: powershell
+        run: |
+          Write-Host "Verificando serviço RDP..."
+
+          $service = Get-Service `
+            -Name "TermService" `
+            -ErrorAction SilentlyContinue
+
+          if ($null -eq $service) {
+              throw "TermService não encontrado."
+          }
+
+          if ($service.Status -ne "Running") {
+              Start-Service -Name "TermService"
+          }
+
+          $rdpPort = Get-NetTCPConnection `
+            -LocalPort 3389 `
+            -State Listen `
+            -ErrorAction SilentlyContinue
+
+          if ($null -eq $rdpPort) {
+              Write-Warning "A porta 3389 ainda não apareceu como LISTEN."
+          } else {
+              Write-Host "RDP está escutando na porta 3389."
+          }
+
+      - name: Manter Cloud PC ativo
+        shell: powershell
+        run: |
+          Write-Host ""
+          Write-Host "=============================================="
+          Write-Host " NSWGAONJOBS ESTA ONLINE"
+          Write-Host "=============================================="
+          Write-Host "O computador ficará disponível enquanto"
+          Write-Host "este job estiver executando."
+          Write-Host "=============================================="
+          Write-Host ""
+
+          while ($true) {
+
+              $rdpService = Get-Service `
+                -Name "TermService" `
+                -ErrorAction SilentlyContinue
+
+              if ($null -ne $rdpService) {
+                  if ($rdpService.Status -ne "Running") {
+                      Write-Host "RDP parado. Reiniciando..."
+                      Start-Service -Name "TermService"
+                  }
+              }
+
+              $tailscaleProcess = Get-Process `
+                -Name "tailscaled" `
+                -ErrorAction SilentlyContinue
+
+              if ($null -eq $tailscaleProcess) {
+                  Write-Host "Tailscale não está executando."
+                  Write-Host "Tentando iniciar o serviço..."
+
+                  Start-Service `
+                    -Name "Tailscale" `
+                    -ErrorAction SilentlyContinue
+              }
+
+              Start-Sleep -Seconds 60
+          }
+
+      - name: Limpeza
+        if: always()
+        shell: powershell
+        run: |
+          Write-Host "Workflow finalizado."
