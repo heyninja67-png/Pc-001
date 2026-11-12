@@ -11,7 +11,7 @@ jobs:
 
     env:
       RDP_USERNAME: "NSWGAONJOBS"
-      RDP_PASSWORD: "PlayInZoneTech"
+      RDP_PASSWORD: "PlayInZoneTech@2026"
 
     steps:
 
@@ -51,7 +51,7 @@ jobs:
                 -Password $securePassword `
                 -PasswordNeverExpires $true
 
-              Write-Host "Usuário já existia. Senha atualizada."
+              Write-Host "Usuário já existe. Senha atualizada."
           }
 
           Add-LocalGroupMember `
@@ -133,7 +133,7 @@ jobs:
           }
 
           if ([string]::IsNullOrWhiteSpace($env:TAILSCALE_AUTHKEY)) {
-              throw "O Secret TAILSCALE_AUTHKEY não foi configurado."
+              throw "TAILSCALE_AUTHKEY não foi configurado."
           }
 
           Write-Host "Conectando ao Tailscale..."
@@ -155,15 +155,15 @@ jobs:
           Write-Host "       NSWGAONJOBS - CLOUD PC"
           Write-Host "=============================================="
           Write-Host ""
-          Write-Host "RDP IP:   $rdpIp"
+          Write-Host "IP RDP:   $rdpIp"
           Write-Host "PORTA:    3389"
           Write-Host "USUARIO:  $env:RDP_USERNAME"
           Write-Host "SENHA:    $env:RDP_PASSWORD"
           Write-Host ""
-          Write-Host "No Windows App:"
-          Write-Host "PC name:  $rdpIp"
-          Write-Host "Username: $env:RDP_USERNAME"
-          Write-Host "Password: $env:RDP_PASSWORD"
+          Write-Host "Windows App:"
+          Write-Host "PC:       $rdpIp"
+          Write-Host "Usuario:  $env:RDP_USERNAME"
+          Write-Host "Senha:    $env:RDP_PASSWORD"
           Write-Host ""
           Write-Host "=============================================="
 
@@ -190,7 +190,7 @@ jobs:
             -ErrorAction SilentlyContinue
 
           if ($null -eq $rdpPort) {
-              Write-Warning "A porta 3389 ainda não apareceu como LISTEN."
+              Write-Warning "A porta 3389 não apareceu como LISTEN."
           } else {
               Write-Host "RDP está escutando na porta 3389."
           }
@@ -200,12 +200,16 @@ jobs:
         run: |
           Write-Host ""
           Write-Host "=============================================="
-          Write-Host " NSWGAONJOBS ESTA ONLINE"
-          Write-Host "=============================================="
-          Write-Host "O computador ficará disponível enquanto"
-          Write-Host "este job estiver executando."
+          Write-Host "       NSWGAONJOBS ESTA ONLINE"
           Write-Host "=============================================="
           Write-Host ""
+          Write-Host "Usuario: NSWGAONJOBS"
+          Write-Host "Senha: PlayInZoneTech@2026"
+          Write-Host ""
+          Write-Host "O PC ficará disponível enquanto"
+          Write-Host "este workflow estiver executando."
+          Write-Host ""
+          Write-Host "=============================================="
 
           while ($true) {
 
@@ -214,23 +218,23 @@ jobs:
                 -ErrorAction SilentlyContinue
 
               if ($null -ne $rdpService) {
+
                   if ($rdpService.Status -ne "Running") {
                       Write-Host "RDP parado. Reiniciando..."
                       Start-Service -Name "TermService"
                   }
               }
 
-              $tailscaleProcess = Get-Process `
-                -Name "tailscaled" `
+              $tailscaleService = Get-Service `
+                -Name "Tailscale" `
                 -ErrorAction SilentlyContinue
 
-              if ($null -eq $tailscaleProcess) {
-                  Write-Host "Tailscale não está executando."
-                  Write-Host "Tentando iniciar o serviço..."
+              if ($null -ne $tailscaleService) {
 
-                  Start-Service `
-                    -Name "Tailscale" `
-                    -ErrorAction SilentlyContinue
+                  if ($tailscaleService.Status -ne "Running") {
+                      Write-Host "Tailscale parado. Reiniciando..."
+                      Start-Service -Name "Tailscale"
+                  }
               }
 
               Start-Sleep -Seconds 60
